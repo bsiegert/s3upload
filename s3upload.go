@@ -2,15 +2,25 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
 	"os/user"
+	"strings"
 
 	"launchpad.net/goamz/aws"
 	"launchpad.net/goamz/s3"
 )
+
+func ParseURL(url string) (bucket string, path string) {
+	if len(url) < 6 || url[0:5] != "s3://" {
+		return "", ""
+	}
+	s := strings.SplitN(url[5:], "/", 2)
+	return s[0], s[1]
+}
 
 func ReadConfig() (accesskey string, secret string, err error) {
 	homedir := os.Getenv("HOME")
@@ -40,6 +50,8 @@ func ReadConfig() (accesskey string, secret string, err error) {
 }
 
 func main() {
+	flag.Parse()
+
 	var err error
 	var auth aws.Auth
 	auth.AccessKey, auth.SecretKey, err = ReadConfig()
@@ -47,10 +59,25 @@ func main() {
 		log.Fatalf("Reading config file: %s", err.Error())
 	}
 
-	conn := s3.New(auth, aws.EUWest)
-	bucket := conn.Bucket("miros")
+	args := flag.Args()
+	if len(args) == 0 {
+		flag.Usage()
+		return
+	}
+	na := len(args)
+	target := args[na-1]
+	args = args[:na-1]
 
-	list, err := bucket.List("", "", "", 100)
+	bucketname, bpath := ParseURL(target)
+	if bucketname == "" {
+		log.Fatalf("invalid target URL: %s", target)
+	}
+	log.Print(bucketname, bpath)
+
+	conn := s3.New(auth, aws.EUWest)
+	bucket := conn.Bucket(bucketname)
+
+	list, err := bucket.List(bpath, "", "", 100)
 	if err != nil {
 		log.Fatal(err)
 	}

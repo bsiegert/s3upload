@@ -21,6 +21,11 @@ var (
 	nConn = flag.Int("n", 3, "maximum number of connections")
 )
 
+type Upload struct {
+	fi os.FileInfo
+	local, remote string
+}
+
 func ParseURL(url string) (bucket string, path string) {
 	if len(url) < 6 || url[0:5] != "s3://" {
 		return "", ""
@@ -86,38 +91,32 @@ func main() {
 	// Start nConn upload routines
 	var wg sync.WaitGroup
 	wg.Add(*nConn)
-	c := make(chan string, *nConn)
+	c := make(chan *Upload, *nConn)
 	for i := 0; i < *nConn; i++ {
 		go func() {
-			for filename := range c {
-				fi, err := os.Stat(filename)
-				if err != nil {
-					log.Print(err)
-					continue
-				}
-				f, err := os.Open(filename)
+			for u := range c {
+				f, err := os.Open(u.local)
 				if err != nil {
 					log.Print(err)
 					continue
 				}
 
-				mimetype := mime.TypeByExtension(filepath.Ext(filename))
+				mimetype := mime.TypeByExtension(filepath.Ext(u.local))
 				if mimetype == "" {
 					mimetype = "application/octet-stream"
 				}
-				tpath := path.Clean(path.Join(bpath, fi.Name()))
-				log.Print(filename)
-				err = bucket.PutReader(tpath, f, fi.Size(), mimetype, s3.PublicRead)
+				log.Print(u.remote)
+				err = bucket.PutReader(u.remote, f, u.fi.Size(), mimetype, s3.PublicRead)
 				if err == nil {
 					f.Close()
 					continue
 				}
 				// Infinite retries ...
 				for i := 1; err != nil; i++ {
-					log.Printf("Error uploading %s: %s", tpath, err.Error())
+					log.Printf("Error uploading %s: %s", u.remote, err.Error())
 					f.Seek(0, 0)
-					log.Printf("%s (retry %d)", tpath, i)
-					err = bucket.PutReader(tpath, f, fi.Size(), mimetype, s3.PublicRead)
+					log.Printf("%s (retry %d)", u.remote, i)
+					err = bucket.PutReader(u.remote, f, u.fi.Size(), mimetype, s3.PublicRead)
 				}
 				f.Close()
 			}
@@ -127,20 +126,31 @@ func main() {
 
 	// Feed file names.
 	for _, a := range args {
-		fi, err := os.Stat(a)
+		u := &Upload{local: a}
+		var err error
+
+		u.fi, err = os.Stat(a)
 		if err != nil {
 			log.Printf("skipping %s: %s", a, err.Error())
 			continue
 		}
-		if fi.IsDir() {
-			filepath.Walk(a, func(path string, fi os.FileInfo, err error) error {
+		if u.fi.IsDir() {
+			basepath := filepath.Dir(a)
+			filepath.Walk(a, func(p string, fi os.FileInfo, err error) error {
 				if err != nil && !fi.IsDir() {
-					c <- path
+					u2 := &Upload{local: p, fi: fi}
+					rel, err := filepath.Rel(basepath, p)
+					if err != nil {
+						return err
+					}
+					u2.remote = path.Join(bpath, filepath.ToSlash(rel))
+					c <- u2
 				}
 				return nil
 			})
 		} else {
-			c <- a
+			u.remote = path.Clean(path.Join(bpath, u.fi.Name()))
+			c <- u
 		}
 	}
 	close(c)

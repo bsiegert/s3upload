@@ -136,8 +136,8 @@ func main() {
 		}
 		if u.fi.IsDir() {
 			basepath := filepath.Dir(a)
-			filepath.Walk(a, func(p string, fi os.FileInfo, err error) error {
-				if err != nil && !fi.IsDir() {
+			err = filepath.Walk(a, func(p string, fi os.FileInfo, err error) error {
+				if err == nil && !fi.IsDir() {
 					u2 := &Upload{local: p, fi: fi}
 					rel, err := filepath.Rel(basepath, p)
 					if err != nil {
@@ -148,6 +148,9 @@ func main() {
 				}
 				return nil
 			})
+			if err != nil {
+				log.Print(err)
+			}
 		} else {
 			u.remote = path.Clean(path.Join(bpath, u.fi.Name()))
 			c <- u

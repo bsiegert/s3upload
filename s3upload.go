@@ -83,16 +83,6 @@ func main() {
 	conn := s3.New(auth, aws.EUWest)
 	bucket := conn.Bucket(bucketname)
 
-	/*
-	list, err := bucket.List(bpath, "", "", 100)
-	if err != nil {
-		log.Fatal(err)
-	}
-	for _, item := range list.Contents {
-		fmt.Printf("%s\t%d\n", item.Key, item.Size)
-	}
-	*/
-
 	// Start nConn upload routines
 	var wg sync.WaitGroup
 	wg.Add(*nConn)
